@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Microsoft.Xna.Framework;
 
@@ -15,6 +16,7 @@ namespace XNAControls.Input
     {
         private readonly KeyboardListener _keyboardListener;
         private readonly MouseListener _mouseListener;
+        private readonly IMouseCoordinateTransformer _coordinateTransformer;
 
         private IEventReceiver _dragTarget;
         private bool _componentsChanged;
@@ -37,8 +39,20 @@ namespace XNAControls.Input
         /// Create a new InputManager using the specified game and MouseListenerSettings
         /// </summary>
         public InputManager(Game game, MouseListenerSettings mouseListenerSettings)
+            : this(game, mouseListenerSettings, null)
+        {
+        }
+
+        /// <summary>
+        /// Create a new InputManager using the specified game, MouseListenerSettings, and optional coordinate transformer
+        /// </summary>
+        /// <param name="game">The game instance</param>
+        /// <param name="mouseListenerSettings">Settings for mouse listener</param>
+        /// <param name="coordinateTransformer">Optional transformer for scaled rendering. When provided, mouse coordinates are transformed before hit detection.</param>
+        public InputManager(Game game, MouseListenerSettings mouseListenerSettings, IMouseCoordinateTransformer coordinateTransformer)
             : base(game)
         {
+            _coordinateTransformer = coordinateTransformer;
             _keyboardListener = new KeyboardListener();
             _mouseListener = new MouseListener(mouseListenerSettings);
 
@@ -56,6 +70,20 @@ namespace XNAControls.Input
             {
                 _componentsChanged = true;
             }
+        }
+
+        /// <summary>
+        /// Gets the transformed mouse position for hit detection.
+        /// If a coordinate transformer is configured, transforms from window to game coordinates.
+        /// </summary>
+        private Point GetTransformedMousePosition()
+        {
+            var rawPosition = MouseExtended.GetState().Position;
+            if (_coordinateTransformer != null)
+            {
+                return _coordinateTransformer.TransformMousePosition(rawPosition);
+            }
+            return rawPosition;
         }
 
         /// <inheritdoc />
@@ -80,12 +108,15 @@ namespace XNAControls.Input
         public override void Update(GameTime gameTime)
         {
             var mouseState = MouseExtended.GetState();
+            var transformedPosition = GetTransformedMousePosition();
+
             if (mouseState.PositionChanged || _componentsChanged)
             {
                 var comps = InputTargetFinder.GetMouseOverEventTargetControl(Game.Components);
                 foreach (var component in comps)
                 {
-                    if (component.EventArea.Contains(mouseState.Position))
+                    // Use transformed position for hit detection
+                    if (component.EventArea.Contains(transformedPosition))
                     {
                         if (!InputTargetFinder.MouseOverState.TryGetValue(component, out var value) || !value)
                         {
@@ -114,6 +145,53 @@ namespace XNAControls.Input
             base.Update(gameTime);
         }
 
+        /// <summary>
+        /// Gets the click target at the transformed mouse position.
+        /// Uses MouseOverState (set during Update with transformed coordinates) and respects ZOrder.
+        /// </summary>
+        private IEventReceiver GetClickTargetAtTransformedPosition()
+        {
+            // Get all components that could be valid targets
+            var comps = InputTargetFinder.GetMouseOverEventTargetControl(Game.Components);
+
+            // Filter to only those that are currently mouse-over (using the already-transformed check from Update)
+            var validTargets = new List<IEventReceiver>();
+            foreach (var component in comps)
+            {
+                if (InputTargetFinder.MouseOverState.TryGetValue(component, out var mouseOver) && mouseOver)
+                {
+                    // Also check that parents are visible
+                    if (component is IDrawable drawable && !drawable.Visible)
+                        continue;
+
+                    validTargets.Add(component);
+                }
+            }
+
+            if (validTargets.Count == 0) return null;
+            if (validTargets.Count == 1) return validTargets[0];
+
+            // Find the one with highest ZOrder
+            var max = validTargets.Max(x => x.ZOrder);
+            var maxTargets = validTargets.Where(x => x.ZOrder == max).ToList();
+
+            if (maxTargets.Count == 1) return maxTargets[0];
+
+            // Tie breaker: lowest UpdateOrder (first to update)
+            if (maxTargets.All(x => x is IUpdateable))
+            {
+                var updateables = maxTargets.OfType<IUpdateable>();
+                var minValue = updateables.Min(x => x.UpdateOrder);
+
+                if (!updateables.All(x => x.UpdateOrder == minValue))
+                {
+                    return maxTargets.MinBy(x => ((IUpdateable)x).UpdateOrder);
+                }
+            }
+
+            return maxTargets.Last();
+        }
+
         private void Keyboard_KeyTyped(object sender, KeyboardEventArgs e)
         {
             // todo: is there a better place to store which textbox is focused?
@@ -132,25 +210,33 @@ namespace XNAControls.Input
 
         private void Mouse_Down(object sender, MouseEventArgs e)
         {
-            var clickTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            var clickTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             clickTarget?.PostMessage(EventType.MouseDown, e);
         }
 
         private void Mouse_Up(object sender, MouseEventArgs e)
         {
-            var clickTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            var clickTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             clickTarget?.PostMessage(EventType.MouseUp, e);
         }
 
         private void Mouse_Click(object sender, MouseEventArgs e)
         {
-            var clickTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            var clickTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             clickTarget?.PostMessage(EventType.Click, e);
         }
 
         private void Mouse_DoubleClick(object sender, MouseEventArgs e)
         {
-            var clickTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            var clickTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             clickTarget?.PostMessage(EventType.DoubleClick, e);
         }
 
@@ -159,7 +245,9 @@ namespace XNAControls.Input
             if (_dragTarget != null)
                 return;
 
-            _dragTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            _dragTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             _dragTarget?.PostMessage(EventType.DragStart, e);
         }
 
@@ -182,7 +270,9 @@ namespace XNAControls.Input
 
         private void Mouse_WheelMoved(object sender, MouseEventArgs e)
         {
-            var clickTarget = InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
+            var clickTarget = _coordinateTransformer != null
+                ? GetClickTargetAtTransformedPosition()
+                : InputTargetFinder.GetMouseButtonEventTargetControl(Game.Components);
             clickTarget?.PostMessage(EventType.MouseWheelMoved, e);
         }
 

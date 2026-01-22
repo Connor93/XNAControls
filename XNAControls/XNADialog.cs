@@ -60,6 +60,13 @@ namespace XNAControls
         /// </summary>
         public static int DialogLayerOffset { get; set; } = 30;
 
+        /// <summary>
+        /// Optional provider for logical game viewport dimensions.
+        /// When set, CenterInGameView will use these dimensions instead of the physical viewport.
+        /// This is essential for scaled rendering modes where the logical game size differs from the window size.
+        /// </summary>
+        public static IGameViewportProvider GameViewportProvider { get; set; }
+
         private bool _modal;
 
         private readonly TaskCompletionSource<XNADialogResult> _showTaskCompletionSource;
@@ -136,11 +143,24 @@ namespace XNAControls
         /// <inheritdoc />
         public virtual void CenterInGameView()
         {
-            var viewport = Game.GraphicsDevice.Viewport;
+            // Use GameViewportProvider if available (for scaled rendering modes)
+            // Otherwise fall back to the physical viewport dimensions
+            int centerWidth, centerHeight;
+            if (GameViewportProvider != null)
+            {
+                centerWidth = GameViewportProvider.GameWidth;
+                centerHeight = GameViewportProvider.GameHeight;
+            }
+            else
+            {
+                var viewport = Game.GraphicsDevice.Viewport;
+                centerWidth = viewport.Width;
+                centerHeight = viewport.Height;
+            }
 
             var bounds = BackgroundTextureSource ?? BackgroundTexture?.Bounds ?? Rectangle.Empty;
-            DrawPosition = new Vector2(viewport.Width/2 - bounds.Width/2,
-                                       viewport.Height/2 - bounds.Height/2);
+            DrawPosition = new Vector2(centerWidth/2 - bounds.Width/2,
+                                       centerHeight/2 - bounds.Height/2);
         }
 
         /// <inheritdoc />
