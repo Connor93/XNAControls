@@ -113,10 +113,81 @@ namespace XNAControls.Input
             if (mouseState.PositionChanged || _componentsChanged)
             {
                 var comps = InputTargetFinder.GetMouseOverEventTargetControl(Game.Components);
+
+                // Find all controls under the mouse position, excluding:
+                // - The drag target (for hold-to-drag mode)
+                // - Controls with very high ZOrder (>= 10000) which are likely click-to-drag items
+                // This allows drop targets to receive MouseOver during any drag operation
+                var controlsUnderMouse = comps
+                    .Where(c => c.EventArea.Contains(transformedPosition))
+                    .Where(c => c != _dragTarget && c.ZOrder < 10000) // Exclude drag-like items from ZOrder calculation
+                    .ToList();
+
+                // Find high-ZOrder controls under mouse (likely dragged items via click-to-drag)
+                var highZOrderControls = comps
+                    .Where(c => c.EventArea.Contains(transformedPosition) && c.ZOrder >= 10000)
+                    .ToList();
+
+                // Determine which controls should receive MouseOver by filtering out those
+                // obscured by higher-ZOrder controls
+                var allowedControls = new HashSet<IEventReceiver>();
+
+                // Always allow the drag target to receive MouseOver
+                if (_dragTarget != null)
+                {
+                    allowedControls.Add(_dragTarget);
+                }
+
+                // Always allow high-ZOrder controls (click-to-drag items) to receive MouseOver
+                // so they can handle click-to-drop events
+                foreach (var highZControl in highZOrderControls)
+                {
+                    allowedControls.Add(highZControl);
+                }
+
+                if (controlsUnderMouse.Count > 0)
+                {
+                    // Find the maximum ZOrder among controls under mouse (excluding drag target)
+                    var maxZOrder = controlsUnderMouse.Max(c => c.ZOrder);
+
+                    // Allow the highest-ZOrder control(s) and all their parent controls
+                    var topControls = controlsUnderMouse.Where(c => c.ZOrder == maxZOrder);
+                    foreach (var topControl in topControls)
+                    {
+                        allowedControls.Add(topControl);
+
+                        // Also allow all parent controls in the hierarchy
+                        if (topControl is IXNAControl xnaControl)
+                        {
+                            var parent = xnaControl.ImmediateParent;
+                            while (parent != null)
+                            {
+                                allowedControls.Add(parent);
+                                parent = parent.ImmediateParent;
+                            }
+                        }
+                    }
+
+                    // Also allow child controls of the topmost controls
+                    foreach (var topControl in topControls.ToList())
+                    {
+                        if (topControl is IXNAControl xnaControl)
+                        {
+                            foreach (var child in xnaControl.FlattenedChildren)
+                            {
+                                if (child.EventArea.Contains(transformedPosition))
+                                {
+                                    allowedControls.Add(child);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 foreach (var component in comps)
                 {
                     // Use transformed position for hit detection
-                    if (component.EventArea.Contains(transformedPosition))
+                    if (component.EventArea.Contains(transformedPosition) && allowedControls.Contains(component))
                     {
                         if (!InputTargetFinder.MouseOverState.TryGetValue(component, out var value) || !value)
                         {
