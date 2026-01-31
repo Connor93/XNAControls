@@ -33,6 +33,8 @@ namespace XNAControls
 
         private bool _multiline;
 
+        private int _cursorPosition;
+
         /// <inheritdoc />
         public override Rectangle DrawArea
         {
@@ -60,6 +62,17 @@ namespace XNAControls
         }
 
         /// <inheritdoc />
+        public int? HardBreak
+        {
+            get => _textLabel.HardBreak;
+            set
+            {
+                _textLabel.HardBreak = value;
+                _defaultTextLabel.HardBreak = value;
+            }
+        }
+
+        /// <inheritdoc />
         public bool PasswordBox { get; set; }
 
         /// <inheritdoc />
@@ -75,6 +88,7 @@ namespace XNAControls
                     return;
 
                 _actualText = value;
+                _cursorPosition = value.Length; // Set cursor to end when text is assigned
                 _textLabel.Text = PasswordBox ? new string(value.Select(x => '*').ToArray()) : value;
                 OnTextChanged?.Invoke(this, EventArgs.Empty);
 
@@ -114,6 +128,16 @@ namespace XNAControls
                 _defaultTextLabel.TextAlign = value;
             }
         }
+
+        /// <summary>
+        /// Gets the current cursor position within the text (character index).
+        /// </summary>
+        public int CursorPosition => _cursorPosition;
+
+        /// <summary>
+        /// Gets the cursor position as (row, column) for multiline text.
+        /// </summary>
+        public (int row, int column) GetCursorRowColumn() => GetCursorRowAndColumn();
 
         /// <inheritdoc />
         public bool Selected
@@ -269,18 +293,65 @@ namespace XNAControls
                 {
                     Vector2 caretAdjust;
 
-                    if (Multiline)
+                    if (Multiline && _textLabel.TextRows.Count > 0)
                     {
-                        var textWidth = _textLabel.MeasureString(_textLabel.TextRows.Last()).X;
-                        var linesToRender = Math.Min(_textLabel.ScrollHandler?.LinesToRender ?? _textLabel.TextRows.Count, _textLabel.TextRows.Count);
-                        var textHeight = (linesToRender - 1) * (_textLabel.RowSpacing ?? (int)_textLabel.ActualHeight);
+                        // Find which display row the cursor is on and its position within that row
+                        // Account for both word wrap and explicit newlines
+                        var charCount = 0;
+                        var cursorRow = 0;
+                        var cursorColInRow = 0;
+                        var sourceIndex = 0;
+
+                        for (var row = 0; row < _textLabel.TextRows.Count; row++)
+                        {
+                            var rowText = _textLabel.TextRows[row];
+                            var rowLen = rowText.Length;
+
+                            // Check if cursor is within this row
+                            if (_cursorPosition <= charCount + rowLen)
+                            {
+                                cursorRow = row;
+                                cursorColInRow = _cursorPosition - charCount;
+                                break;
+                            }
+
+                            charCount += rowLen;
+                            sourceIndex += rowLen;
+
+                            // Account for newline if this row ends with one, or if next row starts at a newline boundary
+                            if (sourceIndex < _actualText.Length && _actualText[sourceIndex] == '\n')
+                            {
+                                charCount++; // The newline itself
+                                sourceIndex++;
+                            }
+
+                            // If we've processed all rows and cursor is at the very end
+                            if (row == _textLabel.TextRows.Count - 1)
+                            {
+                                cursorRow = row;
+                                cursorColInRow = rowLen;
+                            }
+                        }
+
+                        // Measure text on current row up to cursor column
+                        var currentRowText = _textLabel.TextRows[cursorRow];
+                        var textBeforeCursor = cursorColInRow <= currentRowText.Length
+                            ? currentRowText.Substring(0, cursorColInRow)
+                            : currentRowText;
+                        var textWidth = _textLabel.MeasureString(textBeforeCursor).X;
+
+                        // Calculate row offset (account for scroll)
+                        var scrollOffset = _textLabel.ScrollHandler?.ScrollOffset ?? 0;
+                        var displayRow = cursorRow - scrollOffset;
+                        var textHeight = displayRow * (_textLabel.RowSpacing ?? (int)_textLabel.ActualHeight);
+
                         caretAdjust = new Vector2(textWidth, textHeight);
                     }
                     else
                     {
-                        var textWidth = _textLabel.TextWidth.HasValue && _textLabel.ActualWidth > _textLabel.TextWidth
-                            ? _textLabel.TextWidth.Value
-                            : _textLabel.ActualWidth;
+                        // For single-line, measure text up to cursor position
+                        var textUpToCursor = _actualText.Substring(0, _cursorPosition);
+                        var textWidth = _textLabel.MeasureString(textUpToCursor).X;
 
                         caretAdjust = new Vector2(textWidth, 0);
                     }
@@ -370,6 +441,118 @@ namespace XNAControls
             return true;
         }
 
+        /// <summary>
+        /// Handles key press events for navigation keys (arrows, Home, End, Delete)
+        /// </summary>
+        protected override bool HandleKeyPressed(IXNAControl control, KeyboardEventArgs eventArgs)
+        {
+            switch (eventArgs.Key)
+            {
+                case Keys.Left:
+                    if (_cursorPosition > 0)
+                        _cursorPosition--;
+                    return true;
+                case Keys.Right:
+                    if (_cursorPosition < _actualText.Length)
+                        _cursorPosition++;
+                    return true;
+                case Keys.Up:
+                    if (Multiline)
+                        MoveCursorVertically(-1);
+                    return true;
+                case Keys.Down:
+                    if (Multiline)
+                        MoveCursorVertically(1);
+                    return true;
+                case Keys.Home:
+                    _cursorPosition = 0;
+                    return true;
+                case Keys.End:
+                    _cursorPosition = _actualText.Length;
+                    return true;
+                case Keys.Delete:
+                    if (_cursorPosition < _actualText.Length)
+                    {
+                        var newText = _actualText.Remove(_cursorPosition, 1);
+                        var savedCursor = _cursorPosition;
+                        SetTextDirect(newText);
+                        _cursorPosition = savedCursor;
+                    }
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Moves the cursor up or down by the specified number of rows
+        /// </summary>
+        private void MoveCursorVertically(int rowDelta)
+        {
+            if (_textLabel.TextRows.Count <= 1)
+                return;
+
+            // Find current row and column
+            var (currentRow, currentCol) = GetCursorRowAndColumn();
+
+            // Calculate target row
+            var targetRow = Math.Clamp(currentRow + rowDelta, 0, _textLabel.TextRows.Count - 1);
+            if (targetRow == currentRow)
+                return;
+
+            // Calculate new cursor position
+            var targetRowText = _textLabel.TextRows[targetRow];
+            var targetCol = Math.Min(currentCol, targetRowText.Length);
+
+            // Calculate character offset to start of target row
+            var charOffset = 0;
+            for (var row = 0; row < targetRow; row++)
+            {
+                charOffset += _textLabel.TextRows[row].Length;
+                // Account for newlines between rows
+                var rowEndPos = charOffset;
+                if (rowEndPos < _actualText.Length && _actualText[rowEndPos] == '\n')
+                    charOffset++;
+            }
+
+            _cursorPosition = charOffset + targetCol;
+        }
+
+        /// <summary>
+        /// Gets the current cursor row and column within the display rows
+        /// </summary>
+        private (int row, int col) GetCursorRowAndColumn()
+        {
+            var charCount = 0;
+            var sourceIndex = 0;
+
+            for (var row = 0; row < _textLabel.TextRows.Count; row++)
+            {
+                var rowText = _textLabel.TextRows[row];
+                var rowLen = rowText.Length;
+
+                // Check if cursor is within this row
+                if (_cursorPosition <= charCount + rowLen)
+                {
+                    return (row, _cursorPosition - charCount);
+                }
+
+                charCount += rowLen;
+                sourceIndex += rowLen;
+
+                // Account for newline
+                if (sourceIndex < _actualText.Length && _actualText[sourceIndex] == '\n')
+                {
+                    charCount++;
+                    sourceIndex++;
+                }
+            }
+
+            // Cursor at the very end
+            var lastRow = _textLabel.TextRows.Count - 1;
+            return (lastRow, _textLabel.TextRows[lastRow].Length);
+        }
+
         /// <inheritdoc />
         protected virtual bool HandleTextInput(KeyboardEventArgs eventArgs)
         {
@@ -380,7 +563,7 @@ namespace XNAControls
                     {
                         if (Multiline)
                         {
-                            Text += '\n';
+                            InsertTextAtCursor("\n");
                         }
 
                         OnEnterPressed?.Invoke(this, EventArgs.Empty);
@@ -388,9 +571,12 @@ namespace XNAControls
                     break;
                 case Keys.Back:
                     {
-                        if (!string.IsNullOrEmpty(Text))
+                        if (!string.IsNullOrEmpty(Text) && _cursorPosition > 0)
                         {
-                            Text = Text.Remove(Text.Length - 1);
+                            var newText = _actualText.Remove(_cursorPosition - 1, 1);
+                            var newCursor = _cursorPosition - 1;
+                            SetTextDirect(newText);
+                            _cursorPosition = newCursor;
                         }
                     }
                     break;
@@ -398,13 +584,40 @@ namespace XNAControls
                     {
                         if (eventArgs.Character != null)
                         {
-                            Text += eventArgs.Character;
+                            InsertTextAtCursor(eventArgs.Character.ToString());
                         }
                     }
                     break;
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Inserts text at the current cursor position and advances the cursor
+        /// </summary>
+        private void InsertTextAtCursor(string textToInsert)
+        {
+            var newText = _actualText.Insert(_cursorPosition, textToInsert);
+            var newCursor = _cursorPosition + textToInsert.Length;
+            SetTextDirect(newText);
+            _cursorPosition = newCursor;
+        }
+
+        /// <summary>
+        /// Sets the text without resetting cursor position (used for internal editing)
+        /// </summary>
+        private void SetTextDirect(string value)
+        {
+            if (MaxChars > 0 && value.Length > MaxChars)
+                return;
+
+            _actualText = value;
+            _textLabel.Text = PasswordBox ? new string(value.Select(x => '*').ToArray()) : value;
+            OnTextChanged?.Invoke(this, EventArgs.Empty);
+
+            _textLabel.Visible = _actualText.Length > 0;
+            _defaultTextLabel.Visible = _actualText.Length == 0;
         }
 
         /// <inheritdoc />
@@ -567,6 +780,11 @@ namespace XNAControls
         /// Gets or sets the spacing between rows in a multiline textbox, in pixels
         /// </summary>
         int? RowSpacing { get; set; }
+
+        /// <summary>
+        /// Gets or sets the maximum text width for hard breaks (force-wrap long words)
+        /// </summary>
+        int? HardBreak { get; set; }
 
         /// <summary>
         /// Event fired when this text box gets focus
