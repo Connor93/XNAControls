@@ -15,5 +15,12 @@ namespace XNAControls.Input
         /// <param name="windowPosition">The mouse position in window coordinates.</param>
         /// <returns>The transformed position in game coordinates.</returns>
         Point TransformMousePosition(Point windowPosition);
+
+        /// <summary>
+        /// Checks whether the given window-space position is within the game window bounds.
+        /// </summary>
+        /// <param name="windowPosition">The mouse position in window coordinates.</param>
+        /// <returns>True if the position is within the window bounds.</returns>
+        bool IsInBounds(Point windowPosition);
     }
 }

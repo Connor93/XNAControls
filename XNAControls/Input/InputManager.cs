@@ -108,6 +108,16 @@ namespace XNAControls.Input
         public override void Update(GameTime gameTime)
         {
             var mouseState = MouseExtended.GetState();
+
+            // When the mouse is outside the window (e.g., clicking to defocus), skip all
+            // mouse processing so the mouse listener doesn't fire click events to controls.
+            if (_coordinateTransformer != null && !_coordinateTransformer.IsInBounds(mouseState.Position))
+            {
+                _keyboardListener.Update(gameTime);
+                base.Update(gameTime);
+                return;
+            }
+
             var transformedPosition = GetTransformedMousePosition();
 
             if (mouseState.PositionChanged || _componentsChanged)

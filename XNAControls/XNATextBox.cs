@@ -350,7 +350,8 @@ namespace XNAControls
                     else
                     {
                         // For single-line, measure text up to cursor position
-                        var textUpToCursor = _actualText.Substring(0, _cursorPosition);
+                        var clampedCursor = Math.Min(_cursorPosition, _actualText.Length);
+                        var textUpToCursor = _actualText.Substring(0, clampedCursor);
                         var textWidth = _textLabel.MeasureString(textUpToCursor).X;
 
                         caretAdjust = new Vector2(textWidth, 0);
@@ -600,8 +601,12 @@ namespace XNAControls
         {
             var newText = _actualText.Insert(_cursorPosition, textToInsert);
             var newCursor = _cursorPosition + textToInsert.Length;
+            var oldText = _actualText;
             SetTextDirect(newText);
-            _cursorPosition = newCursor;
+            // Only advance cursor if SetTextDirect actually accepted the change
+            // (it silently rejects when MaxChars is exceeded)
+            if (_actualText != oldText)
+                _cursorPosition = newCursor;
         }
 
         /// <summary>
