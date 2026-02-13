@@ -472,6 +472,7 @@ namespace XNAControls
                     _cursorPosition = _actualText.Length;
                     return true;
                 case Keys.Delete:
+                    _cursorPosition = Math.Clamp(_cursorPosition, 0, _actualText.Length);
                     if (_cursorPosition < _actualText.Length)
                     {
                         var newText = _actualText.Remove(_cursorPosition, 1);
@@ -572,6 +573,7 @@ namespace XNAControls
                     break;
                 case Keys.Back:
                     {
+                        _cursorPosition = Math.Clamp(_cursorPosition, 0, _actualText.Length);
                         if (!string.IsNullOrEmpty(Text) && _cursorPosition > 0)
                         {
                             var newText = _actualText.Remove(_cursorPosition - 1, 1);
@@ -599,6 +601,7 @@ namespace XNAControls
         /// </summary>
         private void InsertTextAtCursor(string textToInsert)
         {
+            _cursorPosition = Math.Clamp(_cursorPosition, 0, _actualText.Length);
             var newText = _actualText.Insert(_cursorPosition, textToInsert);
             var newCursor = _cursorPosition + textToInsert.Length;
             var oldText = _actualText;
