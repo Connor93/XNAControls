@@ -187,7 +187,8 @@ namespace XNAControls
         /// <inheritdoc />
         protected override bool HandleDrag(IXNAControl control, MouseEventArgs eventArgs)
         {
-            DrawPosition += eventArgs.DistanceMoved;
+            var scale = GameViewportProvider?.ScaleFactor ?? 1f;
+            DrawPosition += eventArgs.DistanceMoved / scale;
             return true;
         }
 

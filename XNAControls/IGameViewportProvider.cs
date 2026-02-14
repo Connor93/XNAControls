@@ -18,5 +18,11 @@ namespace XNAControls
         /// Gets the logical game viewport height for UI positioning.
         /// </summary>
         int GameHeight { get; }
+
+        /// <summary>
+        /// Gets the current scale factor (window size / logical game size).
+        /// Used to convert screen-space deltas to logical-space deltas.
+        /// </summary>
+        float ScaleFactor { get; }
     }
 }
