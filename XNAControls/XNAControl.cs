@@ -512,15 +512,18 @@ namespace XNAControls
 
             var dialogStack = Singleton<DialogRepository>.Instance.OpenDialogs;
 
-            if (dialogStack.Count <= 0 || this == dialogStack.Peek()) return true;
+            // Use TryPeek to avoid race condition where stack is modified between Count check and Peek()
+            if (!dialogStack.TryPeek(out var topDialog)) return true;
+
+            if (this == topDialog) return true;
 
             // replacement for IgnoreDialogs: if the dialog is not modal, update
-            if (!dialogStack.Peek().Modal) return true;
+            if (!topDialog.Modal) return true;
 
             //return false if:
             //dialog is open and this control is a top parent OR
             //dialog is open and this control does not belong to it
-            return TopParent != null && TopParent == dialogStack.Peek();
+            return TopParent != null && TopParent == topDialog;
         }
 
         /// <summary>
