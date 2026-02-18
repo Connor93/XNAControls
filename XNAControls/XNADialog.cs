@@ -189,7 +189,31 @@ namespace XNAControls
         {
             var scale = GameViewportProvider?.ScaleFactor ?? 1f;
             DrawPosition += eventArgs.DistanceMoved / scale;
+            ClampToViewport();
             return true;
+        }
+
+        /// <summary>
+        /// Clamps the dialog position so it remains within the logical game viewport bounds.
+        /// </summary>
+        protected void ClampToViewport()
+        {
+            int viewWidth, viewHeight;
+            if (GameViewportProvider != null)
+            {
+                viewWidth = GameViewportProvider.GameWidth;
+                viewHeight = GameViewportProvider.GameHeight;
+            }
+            else
+            {
+                var viewport = Game.GraphicsDevice.Viewport;
+                viewWidth = viewport.Width;
+                viewHeight = viewport.Height;
+            }
+
+            var x = MathHelper.Clamp(DrawPosition.X, 0, Math.Max(0, viewWidth - DrawArea.Width));
+            var y = MathHelper.Clamp(DrawPosition.Y, 0, Math.Max(0, viewHeight - DrawArea.Height));
+            DrawPosition = new Vector2(x, y);
         }
 
         /// <summary>
