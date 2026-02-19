@@ -270,7 +270,7 @@ namespace XNAControls
         /// <inheritdoc />
         protected override void OnDrawControl(GameTime gameTime)
         {
-            _spriteBatch.Begin();
+            _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
 
             if(_textBoxBG != null)
                 _spriteBatch.Draw(_textBoxBG, DrawAreaWithParentOffset, Color.White);

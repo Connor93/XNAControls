@@ -329,7 +329,7 @@ namespace XNAControls
                 adjustedY = _alignmentOffset.Y;
             }
 
-            _spriteBatch.Begin();
+            _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
 
             DrawBackground();
 
